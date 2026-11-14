@@ -1,0 +1,2 @@
+ALTER TABLE "grn_header" DROP CONSTRAINT "grn_header_saved_has_no";--> statement-breakpoint
+ALTER TABLE "grn_header" ADD CONSTRAINT "grn_header_saved_has_no" CHECK ("grn_header"."status" <> 'SAVED' or "grn_header"."grn_no" is not null);

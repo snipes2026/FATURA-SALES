@@ -1,0 +1,10 @@
+# LOCAL DEVELOPMENT ONLY — never use on the VPS.
+# Publishes Postgres on 127.0.0.1:5433 so `npm run dev` / `npm run db:*` on your
+# machine can reach the Docker database (5433 avoids clashing with a locally
+# installed Postgres on 5432).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d fatura-db
+services:
+  fatura-db:
+    ports:
+      - "127.0.0.1:5433:5432"

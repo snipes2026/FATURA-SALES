@@ -1,0 +1,86 @@
+name: fatura-desk
+
+services:
+  fatura-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fatura_desk
+      POSTGRES_USER: fatura
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      TZ: Asia/Kolkata
+    volumes:
+      - fatura-pgdata:/var/lib/postgresql/data
+    networks: [internal]
+    # No "ports:" — Postgres is reachable only inside the Docker network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fatura -d fatura_desk"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  fatura-app:
+    build:
+      context: .
+      target: runner
+    image: fatura-desk-app:latest
+    restart: unless-stopped
+    depends_on:
+      fatura-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://fatura:${POSTGRES_PASSWORD}@fatura-db:5432/fatura_desk
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env}
+      AUTH_TRUST_HOST: "true"
+      AUTH_URL: ${APP_URL:-https://localhost}
+      APP_URL: ${APP_URL:-https://localhost}
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - fatura-uploads:/data/uploads
+    networks: [internal]
+    # Bound to localhost only (handy for local testing; not reachable from the internet on the VPS).
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+
+  fatura-caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [fatura-app]
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - fatura-caddy-data:/data
+      - fatura-caddy-config:/config
+    networks: [internal]
+
+  # One-off tasks (not started by `up`):
+  #   docker compose run --rm fatura-migrate                    -> run migrations
+  #   docker compose run --rm fatura-migrate npm run db:seed    -> seed data
+  fatura-migrate:
+    build:
+      context: .
+      target: tools
+    image: fatura-desk-tools:latest
+    profiles: ["tools"]
+    depends_on:
+      fatura-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://fatura:${POSTGRES_PASSWORD}@fatura-db:5432/fatura_desk
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+    networks: [internal]
+
+volumes:
+  fatura-pgdata:
+  fatura-uploads:
+  fatura-caddy-data:
+  fatura-caddy-config:
+
+networks:
+  internal:

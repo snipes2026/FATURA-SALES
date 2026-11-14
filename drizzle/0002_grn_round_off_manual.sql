@@ -1,0 +1,1 @@
+ALTER TABLE "grn_header" ADD COLUMN "round_off_manual" boolean DEFAULT false NOT NULL;
