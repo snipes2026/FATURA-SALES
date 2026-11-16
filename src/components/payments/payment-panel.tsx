@@ -60,19 +60,32 @@ export function PaymentPanel({
       </div>
 
       <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-        {/* Advance from earlier */}
+        {/* Advance / credit from earlier — not a payment mode, moves no cash */}
         {isBill && ctx.advanceAvailable > 0 && (
-          <Row label="Advance" hint={`₹${amt(ctx.advanceAvailable)} available`}>
-            <input
-              id="pay-advance"
-              aria-label="Advance used"
-              inputMode="decimal"
-              className={cn(inputCls, state.advanceUsed !== null && !validMoney(state.advanceUsed) ? "border-danger" : "border-border")}
-              value={state.advanceUsed ?? fromPaise(result.advanceUsed)}
-              onChange={(e) => set({ advanceUsed: e.target.value })}
-              onFocus={(e) => e.currentTarget.select()}
-            />
-          </Row>
+          <div className="rounded-md border border-success/30 bg-success-soft px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input
+                  id="pay-advance"
+                  type="checkbox"
+                  className="size-4 accent-[var(--color-success)]"
+                  checked={state.advanceUsed === null}
+                  onChange={(e) => set({ advanceUsed: e.target.checked ? null : "0" })}
+                />
+                Adjust
+              </label>
+              <span className="text-right text-sm tabular-nums">
+                <span className="text-muted">Advance / Credit available </span>
+                <span className="font-semibold text-success">₹{amt(ctx.advanceAvailable)}</span>
+              </span>
+            </div>
+            {(ctx.advanceFromReturns ?? 0) > 0 && (
+              <p className="mt-0.5 text-right text-[11px] text-muted">of which return credit ₹{amt(ctx.advanceFromReturns!)}</p>
+            )}
+            <p className="mt-0.5 text-[11px] text-muted">
+              {result.advanceUsed > 0 ? `₹${amt(result.advanceUsed)} applied to this bill first; cash / bank covers the rest.` : "Not applied — the bill must then be paid in full now."}
+            </p>
+          </div>
         )}
 
         {modes.map((m) => (

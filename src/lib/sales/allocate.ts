@@ -10,8 +10,10 @@
  *   A = the customer's unused advance
  *
  * Rules
- *  1. Advance first: up to min(A, B) of the customer's advance can pay this bill
- *     (default: as much as possible; editable).
+ *  1. Advance first: up to min(A, B) of the customer's credit (advance + return
+ *     credit) pays this bill — the "Adjust" checkbox, on by default. It may be
+ *     left unused only when the bill is fully paid now: a customer is never in
+ *     Debit (credit bill) and in Credit (unused advance) at the same time.
  *  2. Previous balance first: P goes to O oldest-first (FIFO), then to the
  *     current bill, the rest is excess. The split can be edited (settlement
  *     table) as long as no row exceeds its pending amount and the total ≤ P.
@@ -67,6 +69,7 @@ export type AllocationError = {
     | "ADVANCE_WITH_PREVIOUS_BALANCE"
     | "ADVANCE_NOT_ALLOWED_WALKIN"
     | "CREDIT_NOT_ALLOWED_WALKIN"
+    | "CREDIT_WITH_ADVANCE"
     | "CHANGE_EXCEEDS_CASH"
     | "NOTHING_TO_ALLOCATE";
   message: string;
@@ -155,7 +158,14 @@ export function allocatePayment(inp: AllocateInput): AllocateResult {
   const excess = Math.max(0, P - appliedToPrevious - appliedToBill);
   const previousRemaining = O - appliedToPrevious;
 
-  // 3. Walk-in credit
+  // 3. Never Dr and Cr at once: no credit bill while credit is left unused
+  if (credit > 0 && advanceUsed < maxAdvanceUse)
+    errors.push({
+      code: "CREDIT_WITH_ADVANCE",
+      message: `Customer has ₹${fmt(A - advanceUsed)} advance / credit — adjust it against this bill before leaving ₹${fmt(credit)} on credit`,
+    });
+
+  // Walk-in credit
   if (inp.isWalkin && !inp.walkinAllowCredit && credit > 0)
     errors.push({ code: "CREDIT_NOT_ALLOWED_WALKIN", message: `Walk-in Customer can't buy on credit — ₹${fmt(credit)} is still unpaid` });
 

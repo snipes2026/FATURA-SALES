@@ -71,6 +71,20 @@
       "when": 1794661258335,
       "tag": "0009_sales_advance_adjustments",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794726916139,
+      "tag": "0010_credit_pool_sales_return",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794726990654,
+      "tag": "0011_drop_advance_adjustments",
+      "breakpoints": true
     }
   ]
 }

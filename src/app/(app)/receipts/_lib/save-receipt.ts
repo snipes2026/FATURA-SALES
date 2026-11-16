@@ -7,6 +7,7 @@ import { customerAccount } from "@/lib/customers";
 import { todayIST } from "@/lib/dates";
 import { fromPaise, toPaise } from "@/lib/money";
 import { loadSalesSettings, postReceipt } from "@/lib/sales/posting";
+import { settleCredits } from "@/lib/sales/settle";
 import { ActionError, audit } from "@/lib/server-action";
 import type { CurrentUser } from "@/lib/session";
 import type { receiptSaveSchema } from "@/lib/validation/sales";
@@ -58,6 +59,7 @@ export async function saveReceipt(tx: Tx, input: ReceiptInput, user: Pick<Curren
     remarks: input.remarks,
   });
   if (!receipt) throw new ActionError("Enter the amount received");
+  await settleCredits(tx, customer.id, input.receiptDate, user.id);
 
   const balanceAfter = account.balancePaise - pay.kept;
   await audit(tx, {

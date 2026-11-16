@@ -6,7 +6,7 @@ export type PaymentState = {
   cash: string;
   bank1: string;
   bank2: string;
-  /** null = use as much advance as possible */
+  /** null = "Adjust" on: use as much advance / credit as possible; "0" = Adjust off */
   advanceUsed: string | null;
   /** null = default previous-first (FIFO) split; otherwise the edited settlement table */
   manual: Record<string, string> | null;
@@ -20,6 +20,8 @@ export type PaymentContext = {
   billAmount: number; // paise; 0 for a standalone receipt
   dues: Due[];
   advanceAvailable: number;
+  /** Of the advance available, how much came from sales returns (shown as a breakdown). */
+  advanceFromReturns?: number;
   isWalkin: boolean;
   walkinAllowCredit: boolean;
   walkinAllowAdvance: boolean;

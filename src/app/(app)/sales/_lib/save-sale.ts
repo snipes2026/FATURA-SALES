@@ -7,7 +7,9 @@ import { customerAccount } from "@/lib/customers";
 import { todayIST } from "@/lib/dates";
 import { formatAmount } from "@/lib/india";
 import { fromPaise, toPaise } from "@/lib/money";
+import { applyCredit } from "@/lib/sales/credits";
 import { calcSale } from "@/lib/sales/gst";
+import { settleCredits } from "@/lib/sales/settle";
 import { loadSalesSettings, nextDocNo, postReceipt } from "@/lib/sales/posting";
 import { ActionError, audit } from "@/lib/server-action";
 import type { CurrentUser } from "@/lib/session";
@@ -198,15 +200,9 @@ export async function saveSale(tx: Tx, input: SaleInput, user: Pick<CurrentUser,
     createdBy: user.id,
   });
 
-  // Earlier advance used for this bill (no money moves; the balance already has it as Cr)
+  // Earlier credit (advance / return credit) used for this bill — no money moves; the balance already has it as Cr
   if (pay.advanceUsed > 0) {
-    await tx.insert(schema.advanceAdjustments).values({
-      customerId: customer.id,
-      salesId: h.id,
-      adjDate: input.billDate,
-      amount: fromPaise(pay.advanceUsed),
-      createdBy: user.id,
-    });
+    await applyCredit(tx, { customerId: customer.id, amount: pay.advanceUsed, target: { type: "BILL", salesId: h.id }, date: input.billDate, userId: user.id });
     await tx.insert(schema.customerLedger).values({
       customerId: customer.id,
       entryDate: input.billDate,
@@ -233,6 +229,9 @@ export async function saveSale(tx: Tx, input: SaleInput, user: Pick<CurrentUser,
     settings,
     userId: user.id,
   });
+
+  // Invariant: never Dr and Cr at once (normally a no-op here — the allocation already respects it)
+  await settleCredits(tx, customer.id, input.billDate, user.id);
 
   await audit(tx, {
     userId: user.id,

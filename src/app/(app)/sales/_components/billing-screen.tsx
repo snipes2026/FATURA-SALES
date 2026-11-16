@@ -289,6 +289,7 @@ export function BillingScreen({
       billAmount: Math.max(0, calc.net),
       dues: account?.dues ?? [],
       advanceAvailable: account?.advanceAvailable ?? 0,
+      advanceFromReturns: account?.advanceFromReturns ?? 0,
       isWalkin: !!customer?.isWalkin,
       walkinAllowCredit: settings.walkinAllowCredit,
       walkinAllowAdvance: settings.walkinAllowAdvance,
@@ -427,7 +428,11 @@ export function BillingScreen({
           </div>
           <div className="flex min-w-[200px] flex-col justify-center rounded-md bg-slate-50 px-3 py-2">
             <span className="text-xs text-muted">Current Balance</span>
-            {customer ? <BalanceText paise={account?.balancePaise ?? customer.balancePaise} className="text-base" /> : <span className="text-muted">—</span>}
+            {customer ? (
+              <BalanceText paise={account?.balancePaise ?? customer.balancePaise} returnCredit={account?.advanceFromReturns} className="text-base" />
+            ) : (
+              <span className="text-muted">—</span>
+            )}
             {!!account?.dues.length && (
               <span className="text-[11px] text-muted">
                 {account.dues.length} pending {account.dues.length === 1 ? "bill" : "bills"}

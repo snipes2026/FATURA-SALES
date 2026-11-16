@@ -43,7 +43,7 @@ export function LedgerTable({ ledger, from, to, print }: { ledger: CustomerLedge
           <td className={cn(num, tone(ledger.opening))}>{drCr(ledger.opening)}</td>
         </tr>
         {ledger.entries.map((e) => {
-          const href = voucherHref(e.type, e.voucherId);
+          const href = voucherHref(e.doc, e.voucherId);
           return (
             <tr key={e.id} className={print ? undefined : "hover:bg-slate-50"}>
               <td className={`${td} whitespace-nowrap`}>{formatDate(e.date)}</td>

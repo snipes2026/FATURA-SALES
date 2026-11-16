@@ -9,8 +9,8 @@ const fieldCls = "h-9 rounded-md border border-border bg-surface px-2 text-sm fo
 
 export type SalesFilterValues = { from: string; to: string; customer: { id: number; label: string } | null; q: string; status: "ALL" | "SAVED" | "CANCELLED" };
 
-/** Sales List filters — kept in the URL. */
-export function SalesFilters({ initial }: { initial: SalesFilterValues }) {
+/** Sales List / Sales Return List filters — kept in the URL. */
+export function SalesFilters({ initial, basePath = "/sales", numberLabel = "Bill no." }: { initial: SalesFilterValues; basePath?: string; numberLabel?: string }) {
   const router = useRouter();
   const [v, setV] = useState(initial);
 
@@ -19,7 +19,7 @@ export function SalesFilters({ initial }: { initial: SalesFilterValues }) {
     if (next.customer) q.set("customer", String(next.customer.id));
     if (next.q.trim()) q.set("q", next.q.trim());
     if (next.status !== "ALL") q.set("status", next.status);
-    router.push(`/sales?${q.toString()}`);
+    router.push(`${basePath}?${q.toString()}`);
   };
 
   return (
@@ -50,7 +50,7 @@ export function SalesFilters({ initial }: { initial: SalesFilterValues }) {
         />
       </div>
       <label className="text-xs text-muted">
-        Bill no.
+        {numberLabel}
         <input className={`${fieldCls} mt-1 block w-40 font-mono`} placeholder="e.g. 0012" value={v.q} onChange={(e) => setV({ ...v, q: e.target.value })} />
       </label>
       <label className="text-xs text-muted">

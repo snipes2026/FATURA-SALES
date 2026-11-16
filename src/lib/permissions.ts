@@ -16,14 +16,17 @@ export const PERMISSIONS = [
   "sales.cancel", // cancel a sales bill (reverses stock, ledger, allocations)
   "receipt.create", // customer receipts
   "customer.quickCreate", // "+ Add Customer" from billing / receipts
+  "salesReturn.view", // sales return list, credit notes
+  "salesReturn.create", // create a sales return (credit note)
+  "salesReturn.cancel", // cancel a sales return (reverses stock, ledger, credit, refund)
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
 const ROLE_PERMISSIONS: Record<RoleCode, readonly Permission[]> = {
   ADMIN: PERMISSIONS,
   GRN_ENTRY: ["grn.view", "grn.create", "grn.save", "grn.edit", "barcode.generate", "category.addValue", "supplier.quickCreate"],
-  SALES: ["sales.view", "sales.create", "receipt.create", "customer.quickCreate"],
-  VIEWER: ["grn.view", "sales.view"],
+  SALES: ["sales.view", "sales.create", "receipt.create", "customer.quickCreate", "salesReturn.view", "salesReturn.create"],
+  VIEWER: ["grn.view", "sales.view", "salesReturn.view"],
 };
 
 export function can(role: string | undefined | null, permission: Permission): boolean {

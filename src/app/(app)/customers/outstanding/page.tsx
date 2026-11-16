@@ -45,6 +45,9 @@ export default async function OutstandingPage({ searchParams }: { searchParams: 
               <th className={`${th} text-left`}>Date</th>
               <th className={`${th} text-right`}>Bill Amount</th>
               <th className={`${th} text-right`}>Received</th>
+              <th className={`${th} text-right`} title="Advance and sales-return credit adjusted against the bill">
+                Adjusted
+              </th>
               <th className={`${th} text-right`}>Pending</th>
               <th className={`${th} text-right`}>Age (days)</th>
             </tr>
@@ -54,7 +57,7 @@ export default async function OutstandingPage({ searchParams }: { searchParams: 
               const sub = g.reduce((a, r) => a + r.pending, 0);
               return [
                 <tr key={`h-${g[0].customerId}`} className="bg-slate-50/70">
-                  <td className={`${td} font-semibold`} colSpan={4}>
+                  <td className={`${td} font-semibold`} colSpan={5}>
                     {g[0].customerName} <span className="font-normal text-muted">· {g[0].phone}</span>
                     <Link href={`/customers/ledger?customer=${g[0].customerId}`} className="ml-3 text-xs font-normal text-primary hover:underline">
                       Ledger
@@ -82,6 +85,7 @@ export default async function OutstandingPage({ searchParams }: { searchParams: 
                     <td className={td}>{formatDate(r.date)}</td>
                     <td className={num}>{amt(r.amount)}</td>
                     <td className={num}>{r.received ? amt(r.received) : "—"}</td>
+                    <td className={num}>{r.adjusted ? amt(r.adjusted) : "—"}</td>
                     <td className={`${num} font-medium`}>{amt(r.pending)}</td>
                     <td className={cn(num, ageTone(r.ageDays))}>{r.ageDays}</td>
                   </tr>
@@ -90,7 +94,7 @@ export default async function OutstandingPage({ searchParams }: { searchParams: 
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-10 text-center text-muted">
+                <td colSpan={7} className="px-3 py-10 text-center text-muted">
                   <Wallet className="mx-auto mb-2 size-8 text-slate-300" />
                   {customer ? `${customer.name} has no pending bills.` : "No pending bills."}
                 </td>
@@ -100,7 +104,7 @@ export default async function OutstandingPage({ searchParams }: { searchParams: 
           {rows.length > 0 && (
             <tfoot>
               <tr className="bg-slate-50 font-semibold">
-                <td className={td} colSpan={4}>
+                <td className={td} colSpan={5}>
                   Total pending{groups.size > 1 ? ` (${groups.size} customers)` : ""}
                 </td>
                 <td className={`${num} text-danger`}>{amt(total)}</td>

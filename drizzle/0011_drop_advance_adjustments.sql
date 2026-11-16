@@ -1,0 +1,1 @@
+DROP TABLE "advance_adjustments" CASCADE;

@@ -14,7 +14,7 @@ export default async function SalesSettingsPage() {
     db
       .select()
       .from(schema.counters)
-      .where(and(inArray(schema.counters.name, [COUNTER.INVOICE, COUNTER.RECEIPT]), eq(schema.counters.fy, fy))),
+      .where(and(inArray(schema.counters.name, [COUNTER.INVOICE, COUNTER.RECEIPT, COUNTER.SALES_RETURN]), eq(schema.counters.fy, fy))),
   ]);
   const last = (name: string) => counters.find((c) => c.name === name)?.lastValue ?? 0;
   return (
@@ -22,6 +22,7 @@ export default async function SalesSettingsPage() {
       fy={fy}
       lastInvoice={last(COUNTER.INVOICE)}
       lastReceipt={last(COUNTER.RECEIPT)}
+      lastReturn={last(COUNTER.SALES_RETURN)}
       initial={{
         allowPriceEdit: s?.allowPriceEdit ?? false,
         bank1Name: s?.bank1Name ?? "Bank 1",
@@ -37,6 +38,10 @@ export default async function SalesSettingsPage() {
         printFormat: s?.printFormat ?? "A4",
         walkinAllowCredit: s?.walkinAllowCredit ?? false,
         walkinAllowAdvance: s?.walkinAllowAdvance ?? false,
+        returnQtyCheck: s?.returnQtyCheck ?? "WARN",
+        returnPrefix: s?.returnPrefix ?? "SR",
+        returnDigits: String(s?.returnDigits ?? 4),
+        returnPrintFormat: s?.returnPrintFormat ?? "A4",
       }}
     />
   );

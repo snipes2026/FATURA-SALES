@@ -22,6 +22,8 @@ export function TotalsBar({
   interState,
   itemCount,
   totalQty,
+  netLabel = "Net Payable",
+  gstModeLocked,
 }: {
   calc: SaleCalc;
   gstMode: SaleGstMode;
@@ -33,6 +35,9 @@ export function TotalsBar({
   interState: boolean;
   itemCount: number;
   totalQty: number;
+  netLabel?: string;
+  /** Sales Return against a bill: GST mode (and any override) come from the bill. */
+  gstModeLocked?: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -99,8 +104,14 @@ export function TotalsBar({
               role="radio"
               aria-checked={gstMode === m}
               tabIndex={-1}
+              disabled={!!gstModeLocked}
+              title={gstModeLocked}
               onClick={() => onGstMode(m)}
-              className={cn("rounded px-3 py-1 text-xs font-medium", gstMode === m ? "bg-primary text-white" : "text-muted hover:text-ink")}
+              className={cn(
+                "rounded px-3 py-1 text-xs font-medium",
+                gstMode === m ? "bg-primary text-white" : "text-muted hover:text-ink",
+                gstModeLocked && gstMode !== m && "cursor-not-allowed opacity-50",
+              )}
             >
               {m === "ADD" ? "Add GST" : "Includes GST"}
             </button>
@@ -121,7 +132,7 @@ export function TotalsBar({
           <MoneyCell
             label={gstMode === "INCLUDES" ? "GST (included)" : "GST"}
             paise={calc.gst}
-            editable={gstMode === "ADD"}
+            editable={gstMode === "ADD" && !gstModeLocked}
             manual={gstMode === "ADD" && gstOverride !== null}
             allowNegative={false}
             onChange={onGstOverride}
@@ -129,7 +140,7 @@ export function TotalsBar({
           />
           <MoneyCell label="Round Off" paise={calc.roundOff} editable manual={roundOff !== null} allowNegative onChange={onRoundOff} title="Auto to the nearest rupee — type to change" />
           <div className="text-right">
-            <div className="text-xs text-muted">Net Payable</div>
+            <div className="text-xs text-muted">{netLabel}</div>
             <div className="text-2xl font-semibold tabular-nums">₹{amt(calc.net)}</div>
           </div>
         </div>

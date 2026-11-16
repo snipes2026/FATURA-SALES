@@ -22,15 +22,32 @@ type Values = {
   printFormat: "A4" | "THERMAL80";
   walkinAllowCredit: boolean;
   walkinAllowAdvance: boolean;
+  returnQtyCheck: "OFF" | "WARN" | "BLOCK";
+  returnPrefix: string;
+  returnDigits: string;
+  returnPrintFormat: "A4" | "THERMAL80";
 };
 
 const clampDigits = (v: string) => Math.min(Math.max(Number(v) || 4, 1), 8);
 
-export function SalesSettingsForm({ initial, fy, lastInvoice, lastReceipt }: { initial: Values; fy: string; lastInvoice: number; lastReceipt: number }) {
+export function SalesSettingsForm({
+  initial,
+  fy,
+  lastInvoice,
+  lastReceipt,
+  lastReturn,
+}: {
+  initial: Values;
+  fy: string;
+  lastInvoice: number;
+  lastReceipt: number;
+  lastReturn: number;
+}) {
   const f = useForm<Values>(initial);
   const v = f.values;
   const nextInvoice = formatDocNo({ prefix: v.invoicePrefix || "INV", digits: clampDigits(v.invoiceDigits) }, fy, lastInvoice + 1);
   const nextReceipt = formatDocNo({ prefix: v.receiptPrefix || "RCT", digits: clampDigits(v.receiptDigits) }, fy, lastReceipt + 1);
+  const nextReturn = formatDocNo({ prefix: v.returnPrefix || "SR", digits: clampDigits(v.returnDigits) }, fy, lastReturn + 1);
 
   return (
     <form
@@ -116,6 +133,36 @@ export function SalesSettingsForm({ initial, fy, lastInvoice, lastReceipt }: { i
       </Card>
 
       <Card>
+        <CardHeader title="Sales Return" />
+        <CardBody>
+          <FormGrid>
+            <SelectField
+              label="Return-quantity check"
+              name="returnQtyCheck"
+              options={[
+                { value: "WARN", label: "Warn — amber, needs confirmation" },
+                { value: "BLOCK", label: "Block — can't save" },
+                { value: "OFF", label: "Off — no check" },
+              ]}
+              value={v.returnQtyCheck}
+              onChange={(e) => f.set("returnQtyCheck", e.target.value as Values["returnQtyCheck"])}
+              hint="Returned qty vs qty sold to the customer (or on the linked bill), less what was already returned"
+            />
+            <SelectField
+              label="Credit note print format"
+              name="returnPrintFormat"
+              options={[
+                { value: "A4", label: "A4 Credit Note" },
+                { value: "THERMAL80", label: "3-inch (80mm) thermal" },
+              ]}
+              value={v.returnPrintFormat}
+              onChange={(e) => f.set("returnPrintFormat", e.target.value as Values["returnPrintFormat"])}
+            />
+          </FormGrid>
+        </CardBody>
+      </Card>
+
+      <Card>
         <CardHeader title="Numbering" />
         <CardBody>
           <FormGrid>
@@ -123,15 +170,18 @@ export function SalesSettingsForm({ initial, fy, lastInvoice, lastReceipt }: { i
             <TextField label="Invoice digits" name="invoiceDigits" required inputMode="numeric" value={v.invoiceDigits} onChange={(e) => f.set("invoiceDigits", e.target.value.replace(/\D/g, ""))} error={f.errors.invoiceDigits} hint="3 to 8" />
             <TextField label="Receipt prefix" name="receiptPrefix" required maxLength={20} inputClassName="uppercase" value={v.receiptPrefix} onChange={(e) => f.set("receiptPrefix", e.target.value.toUpperCase())} error={f.errors.receiptPrefix} />
             <TextField label="Receipt digits" name="receiptDigits" required inputMode="numeric" value={v.receiptDigits} onChange={(e) => f.set("receiptDigits", e.target.value.replace(/\D/g, ""))} error={f.errors.receiptDigits} hint="3 to 8" />
+            <TextField label="Sales Return prefix" name="returnPrefix" required maxLength={20} inputClassName="uppercase" value={v.returnPrefix} onChange={(e) => f.set("returnPrefix", e.target.value.toUpperCase())} error={f.errors.returnPrefix} />
+            <TextField label="Sales Return digits" name="returnDigits" required inputMode="numeric" value={v.returnDigits} onChange={(e) => f.set("returnDigits", e.target.value.replace(/\D/g, ""))} error={f.errors.returnDigits} hint="3 to 8" />
           </FormGrid>
           <div className="mt-4 space-y-1 rounded-md bg-slate-50 p-3 text-sm">
             <p>
-              Financial year <strong>{fy}</strong> · Bills issued: <strong>{lastInvoice}</strong> · Receipts issued: <strong>{lastReceipt}</strong>
+              Financial year <strong>{fy}</strong> · Bills issued: <strong>{lastInvoice}</strong> · Receipts issued: <strong>{lastReceipt}</strong> · Credit notes issued: <strong>{lastReturn}</strong>
             </p>
             <p>
-              Next bill: <strong className="font-mono">{nextInvoice}</strong> · Next receipt: <strong className="font-mono">{nextReceipt}</strong>
+              Next bill: <strong className="font-mono">{nextInvoice}</strong> · Next receipt: <strong className="font-mono">{nextReceipt}</strong> · Next credit note:{" "}
+              <strong className="font-mono">{nextReturn}</strong>
             </p>
-            <p className="text-xs text-muted">Both restart at 1 every 1 April.</p>
+            <p className="text-xs text-muted">All restart at 1 every 1 April.</p>
           </div>
         </CardBody>
       </Card>

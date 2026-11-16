@@ -1,10 +1,11 @@
 import "server-only";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import { customerAccount } from "@/lib/customers";
 import { todayIST } from "@/lib/dates";
 import { formatAmount } from "@/lib/india";
 import { fromPaise, toPaise } from "@/lib/money";
+import { addCredit, creditFor, reverseApplications, withdrawCredit } from "@/lib/sales/credits";
+import { settleCredits } from "@/lib/sales/settle";
 import { ActionError, audit } from "@/lib/server-action";
 import type { CurrentUser } from "@/lib/session";
 
@@ -51,6 +52,16 @@ export async function cancelSale(tx: Tx, p: { id: number; version: number; reaso
       `Receipt${later.length > 1 ? "s" : ""} ${[...new Set(later.map((l) => l.receiptNo))].join(", ")} ${later.length > 1 ? "were" : "was"} allocated to ${h.billNo}. Cancel ${later.length > 1 ? "those receipts" : "that receipt"} first.`,
     );
 
+  // An active Sales Return against this bill blocks the cancel
+  const returns = await tx
+    .select({ returnNo: schema.salesReturnHeader.returnNo })
+    .from(schema.salesReturnHeader)
+    .where(and(eq(schema.salesReturnHeader.againstSalesId, h.id), eq(schema.salesReturnHeader.status, "SAVED")));
+  if (returns.length)
+    throw new ActionError(
+      `Sales Return ${returns.map((r) => r.returnNo).join(", ")} ${returns.length > 1 ? "were" : "was"} made against ${h.billNo}. Cancel ${returns.length > 1 ? "those returns" : "that return"} first.`,
+    );
+
   const today = todayIST();
   const now = new Date();
 
@@ -73,13 +84,8 @@ export async function cancelSale(tx: Tx, p: { id: number; version: number; reaso
     createdBy: user.id,
   });
 
-  // 3. Earlier advance used on this bill goes back to the customer
-  const adjs = await tx
-    .update(schema.advanceAdjustments)
-    .set({ reversedAt: now, reversedBy: user.id })
-    .where(and(eq(schema.advanceAdjustments.salesId, h.id), isNull(schema.advanceAdjustments.reversedAt)))
-    .returning({ amount: schema.advanceAdjustments.amount });
-  const advanceReleased = adjs.reduce((a, x) => a + toPaise(x.amount), 0);
+  // 3. Earlier credit (advance / return credit) used on this bill goes back to the customer
+  const advanceReleased = await reverseApplications(tx, { salesId: h.id }, user.id);
   if (advanceReleased > 0)
     await tx.insert(schema.customerLedger).values({
       customerId: h.customerId,
@@ -111,7 +117,11 @@ export async function cancelSale(tx: Tx, p: { id: number; version: number; reaso
       .returning({ amount: schema.receiptAllocations.amount });
     paid = allocs.reduce((a, x) => a + toPaise(x.amount), 0);
     if (paid > 0 && !customer.isWalkin) {
-      await tx.insert(schema.receiptAllocations).values({ receiptId: own.id, targetType: "ADVANCE", salesId: null, amount: fromPaise(paid) });
+      const [adv] = await tx
+        .insert(schema.receiptAllocations)
+        .values({ receiptId: own.id, targetType: "ADVANCE", salesId: null, amount: fromPaise(paid) })
+        .returning({ id: schema.receiptAllocations.id });
+      await addCredit(tx, { customerId: h.customerId, sourceType: "ADVANCE", sourceId: adv.id, date: today, amount: paid, userId: user.id });
       await tx.insert(schema.customerLedger).values({
         customerId: h.customerId,
         entryDate: today,
@@ -168,17 +178,27 @@ export async function cancelSale(tx: Tx, p: { id: number; version: number; reaso
     .set({ status: "CANCELLED", cancelReason: p.reason, cancelledAt: now, cancelledBy: user.id, version: sql`${schema.salesHeader.version} + 1` })
     .where(eq(schema.salesHeader.id, h.id));
 
+  // Credit released / money kept as advance goes to the customer's other pending bills first
+  const settledElsewhere = await settleCredits(tx, h.customerId, today, user.id, `${h.billNo} cancelled`);
+
   await audit(tx, {
     userId: user.id,
     table: "sales_header",
     recordId: h.id,
     action: "CANCEL",
     oldValue: { status: "SAVED", billNo: h.billNo, net: h.netAmount },
-    newValue: { status: "CANCELLED", stockReturned: lines.reduce((a, l) => a + l.qty, 0), advanceReleased: fromPaise(advanceReleased), paidKeptAsAdvance: fromPaise(paid - refunded), refunded: fromPaise(refunded) },
+    newValue: {
+      status: "CANCELLED",
+      stockReturned: lines.reduce((a, l) => a + l.qty, 0),
+      advanceReleased: fromPaise(advanceReleased),
+      paidKeptAsAdvance: fromPaise(paid - refunded),
+      refunded: fromPaise(refunded),
+      appliedToOtherBills: fromPaise(settledElsewhere),
+    },
     reason: p.reason,
   });
 
-  return { billNo: h.billNo, paid, refunded, advanceReleased };
+  return { billNo: h.billNo, paid, refunded, advanceReleased, settledElsewhere };
 }
 
 /**
@@ -197,12 +217,14 @@ export async function cancelReceipt(tx: Tx, p: { id: number; reason: string }, u
     .select()
     .from(schema.receiptAllocations)
     .where(and(eq(schema.receiptAllocations.receiptId, r.id), isNull(schema.receiptAllocations.reversedAt)));
-  const advance = allocs.filter((a) => a.targetType === "ADVANCE").reduce((s, a) => s + toPaise(a.amount), 0);
-  if (advance > 0) {
-    const acc = await customerAccount(tx, r.customerId);
-    if (acc.advanceAvailable < advance)
-      throw new ActionError(`${rs(advance - acc.advanceAvailable)} of the advance from ${r.receiptNo} has already been used on a later bill — cancel that bill first`);
+  // The advance this receipt created must still be unused — then it is withdrawn from the credit pool
+  let advanceUsed = 0;
+  for (const a of allocs.filter((x) => x.targetType === "ADVANCE")) {
+    const c = await creditFor(tx, "ADVANCE", a.id);
+    if (c) advanceUsed += await withdrawCredit(tx, c.id, user.id);
   }
+  if (advanceUsed > 0)
+    throw new ActionError(`${rs(advanceUsed)} of the advance from ${r.receiptNo} has already been used on a later bill — cancel that bill first`);
 
   // A walk-in refund already paid this receipt's money back — don't reverse it twice
   const [refund] = await tx
@@ -244,6 +266,8 @@ export async function cancelReceipt(tx: Tx, p: { id: number; reason: string }, u
       })),
     );
   await tx.update(schema.receipts).set({ status: "CANCELLED", cancelReason: p.reason, cancelledAt: now, cancelledBy: user.id }).where(eq(schema.receipts.id, r.id));
+  // Bills this receipt paid are pending again — any credit the customer holds goes to them
+  await settleCredits(tx, r.customerId, today, user.id, `${r.receiptNo} cancelled`);
   await audit(tx, {
     userId: user.id,
     table: "receipts",

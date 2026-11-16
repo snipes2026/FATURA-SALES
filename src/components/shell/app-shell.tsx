@@ -11,7 +11,7 @@ import { Topbar } from "./topbar";
 const COLLAPSE_KEY = "fd.sidebarCollapsed";
 
 /** Full-height working screens (billing, receipts): sidebar auto-collapsed, no page scroll, no footer. */
-const FULL_SCREEN = ["/sales/new", "/receipts/new"];
+const FULL_SCREEN = ["/sales/new", "/receipts/new", "/sales-returns/new"];
 
 export function AppShell({ user, children }: { user: CurrentUser; children: React.ReactNode }) {
   const pathname = usePathname();

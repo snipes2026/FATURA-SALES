@@ -23,6 +23,10 @@ export type SaleLineInput = {
   ratePaise: number;
   hsn: string;
   dept: DeptTax;
+  /** Sales Return against a bill: the GST rate the bill charged (no slab lookup). */
+  fixedRate?: number;
+  /** Sales Return against a bill whose GST was overridden: this line's GST in paise, as the bill charged it. */
+  fixedGst?: number;
 };
 
 export type SaleCalcInput = {
@@ -68,9 +72,16 @@ function split(gst: number, taxType: TaxType) {
 export function calcSale(inp: SaleCalcInput) {
   const lines: SaleLineCalc[] = inp.lines.map((l) => {
     const amount = l.qty * l.ratePaise;
-    const gstRate = saleRateFor(l.dept, l.ratePaise, inp.gstMode);
-    const taxable = inp.gstMode === "INCLUDES" ? taxableFromInclusive(amount, gstRate) : amount;
-    const gst = inp.gstMode === "INCLUDES" ? amount - taxable : percentOf(amount, gstRate);
+    const gstRate = l.fixedRate ?? saleRateFor(l.dept, l.ratePaise, inp.gstMode);
+    let taxable: number;
+    let gst: number;
+    if (l.fixedGst !== undefined) {
+      gst = Math.max(0, l.fixedGst);
+      taxable = inp.gstMode === "INCLUDES" ? amount - gst : amount;
+    } else {
+      taxable = inp.gstMode === "INCLUDES" ? taxableFromInclusive(amount, gstRate) : amount;
+      gst = inp.gstMode === "INCLUDES" ? amount - taxable : percentOf(amount, gstRate);
+    }
     return { amount, gstRate, taxable, gst, ...split(gst, inp.taxType) };
   });
 

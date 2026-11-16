@@ -179,6 +179,21 @@ describe("allocatePayment — credit, change and advance", () => {
     const c = allocatePayment(inp({ billAmount: r(3000), advanceAvailable: r(5000), advanceUsed: r(4000) }));
     assert.equal(c.errors[0].code, "ADVANCE_USE_INVALID");
   });
+
+  it("Section 6 example: advance 5,000, bill 12,000, cash 7,000 → no credit, balance Nil", () => {
+    const a = allocatePayment(inp({ billAmount: r(12000), advanceAvailable: r(5000), cash: 7000 }));
+    assert.ok(a.ok);
+    assert.deepEqual([a.advanceUsed, a.appliedToBill, a.credit, a.balanceAfter], [r(5000), r(7000), 0, 0]);
+  });
+
+  it("Adjust off: allowed only when the bill is fully paid now (never Dr and Cr at once)", () => {
+    const off = allocatePayment(inp({ billAmount: r(12000), advanceAvailable: r(5000), advanceUsed: 0, cash: 7000 }));
+    assert.equal(off.ok, false);
+    assert.equal(off.errors[0].code, "CREDIT_WITH_ADVANCE");
+    const paid = allocatePayment(inp({ billAmount: r(12000), advanceAvailable: r(5000), advanceUsed: 0, cash: 12000 }));
+    assert.ok(paid.ok);
+    assert.deepEqual([paid.credit, paid.balanceAfter], [0, -r(5000)]);
+  });
 });
 
 describe("allocatePayment — Walk-in Customer", () => {

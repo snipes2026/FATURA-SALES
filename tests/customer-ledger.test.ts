@@ -151,10 +151,10 @@ describe("customer ledger", () => {
     const b3 = (await sale("2026-10-03", 1, pay())).id; // 1,000 credit
     const out = await app.ledger.outstandingBills(app.db, { customerId: custId, asOf: "2026-10-13" });
     assert.deepEqual(
-      out.map((o) => [o.salesId, R(o.amount), R(o.received), R(o.pending), o.ageDays]),
+      out.map((o) => [o.salesId, R(o.amount), R(o.received), R(o.adjusted), R(o.pending), o.ageDays]),
       [
-        [b2, 2000, 500, 1500, 11],
-        [b3, 1000, 0, 1000, 10],
+        [b2, 2000, 0, 500, 1500, 11], // the 500 advance shows as adjusted, not received
+        [b3, 1000, 0, 0, 1000, 10],
       ],
     );
     // Pay the newer bill only, leave the older one pending

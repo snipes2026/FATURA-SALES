@@ -8,8 +8,8 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { cancelReceiptAction, cancelSaleAction } from "../actions";
 
-/** Mandatory-reason dialog shared by bill and receipt cancel. */
-function ReasonDialog({
+/** Mandatory-reason dialog shared by bill, receipt and credit note cancel. */
+export function ReasonDialog({
   open,
   title,
   body,

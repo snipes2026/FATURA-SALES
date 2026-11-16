@@ -20,6 +20,7 @@ export async function saveSalesSettings(raw: unknown): Promise<ActionResult> {
     });
     revalidatePath("/settings/sales");
     revalidatePath("/sales", "layout");
+    revalidatePath("/sales-returns", "layout");
     return { ok: true, message: "Sales & Payments settings saved" };
   });
 }

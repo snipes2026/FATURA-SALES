@@ -49,6 +49,8 @@ async function customer(opening: number, type: "DR" | "CR") {
       `insert into customer_ledger (customer_id, entry_date, voucher_type, voucher_id, debit, credit) values ($1,'2026-04-01','OPENING',$1,$2,$3)`,
       [cu.id, type === "DR" ? opening : 0, type === "CR" ? opening : 0],
     );
+  if (opening > 0 && type === "CR")
+    await c.query(`insert into customer_credits (customer_id, source_type, source_id, credit_date, amount, remaining) values ($1,'OPENING_CR',$1,'2026-04-01',$2,$2)`, [cu.id, opening]);
   return cu.id as number;
 }
 
@@ -72,8 +74,11 @@ async function receipt(customerId: number, date: string, allocs: { type: "OPENIN
      values ($1,'26-27',$2,$3,$4,'STANDALONE',$5,$6) returning id`,
     [`RCT/${billSeq}`, date, customerId, ids.locationId, total, ids.userId],
   );
-  for (const a of allocs)
-    await c.query(`insert into receipt_allocations (receipt_id, target_type, sales_id, amount) values ($1,$2,$3,$4)`, [r.id, a.type, a.salesId ?? null, a.amount]);
+  for (const a of allocs) {
+    const ra = await one(`insert into receipt_allocations (receipt_id, target_type, sales_id, amount) values ($1,$2,$3,$4) returning id`, [r.id, a.type, a.salesId ?? null, a.amount]);
+    if (a.type === "ADVANCE")
+      await c.query(`insert into customer_credits (customer_id, source_type, source_id, credit_date, amount, remaining) values ($1,'ADVANCE',$2,$3,$4,$4)`, [customerId, ra.id, date, a.amount]);
+  }
   await c.query(`insert into customer_ledger (customer_id, entry_date, voucher_type, voucher_id, credit) values ($1,$2,'RECEIPT',$3,$4)`, [customerId, date, r.id, total]);
   return r.id as number;
 }
@@ -87,7 +92,7 @@ async function check(id: number) {
 }
 
 describe("customerAccount", () => {
-  it("tracks opening + bills + receipts + advance + advance adjustment", async () => {
+  it("tracks opening + bills + receipts + advance + credit applied to a bill", async () => {
     const id = await customer(10000, "DR");
     assert.deepEqual(await check(id), { dues: [["OPENING", 10000]], advance: 0, balance: 10000 });
 
@@ -107,11 +112,17 @@ describe("customerAccount", () => {
     assert.deepEqual(await check(id), { dues: [], advance: 1000, balance: -1000 });
 
     const cBill = await bill(id, "2026-08-01", 2500);
-    const adj = await one(`insert into advance_adjustments (customer_id, sales_id, adj_date, amount, created_by) values ($1,$2,'2026-08-01',1000,$3) returning id`, [id, cBill, ids.userId]);
+    const cr = await one(`select id from customer_credits where customer_id = $1`, [id]);
+    await c.query(`update customer_credits set remaining = remaining - 1000 where id = $1`, [cr.id]);
+    const adj = await one(
+      `insert into credit_applications (credit_id, customer_id, target_type, sales_id, applied_date, amount) values ($1,$2,'BILL',$3,'2026-08-01',1000) returning id`,
+      [cr.id, id, cBill],
+    );
     assert.deepEqual(await check(id), { dues: [["BILL", 1500]], advance: 0, balance: 1500 });
 
     // Reversed rows no longer count
-    await c.query(`update advance_adjustments set reversed_at = now() where id = $1`, [adj.id]);
+    await c.query(`update credit_applications set reversed_at = now() where id = $1`, [adj.id]);
+    await c.query(`update customer_credits set remaining = remaining + 1000 where id = $1`, [cr.id]);
     assert.deepEqual(await check(id), { dues: [["BILL", 2500]], advance: 1000, balance: 1500 });
   });
 

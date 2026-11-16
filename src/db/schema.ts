@@ -73,9 +73,16 @@ export const voucherTypeEnum = pgEnum("voucher_type", [
   "SALE_CANCEL",
   "RECEIPT_CANCEL",
   "REFUND",
+  "SALES_RETURN",
+  "SALES_RETURN_CANCEL",
+  "REFUND_CANCEL",
 ]);
 export const cashDirectionEnum = pgEnum("cash_direction", ["IN", "OUT"]);
 export const printFormatEnum = pgEnum("print_format", ["A4", "THERMAL80"]);
+// Credit pool (advances, return credit) and Sales Return
+export const creditSourceEnum = pgEnum("credit_source", ["OPENING_CR", "ADVANCE", "SALES_RETURN"]);
+export const creditTargetEnum = pgEnum("credit_target", ["BILL", "OPENING", "REFUND"]);
+export const returnQtyCheckEnum = pgEnum("return_qty_check", ["OFF", "WARN", "BLOCK"]);
 
 // ---------------------------------------------------------------- users & roles
 export const roles = pgTable("roles", {
@@ -454,11 +461,19 @@ export const salesSettings = pgTable(
     printFormat: printFormatEnum("print_format").notNull().default("A4"),
     walkinAllowCredit: boolean("walkin_allow_credit").notNull().default(false),
     walkinAllowAdvance: boolean("walkin_allow_advance").notNull().default(false),
+    // Sales Return
+    returnQtyCheck: returnQtyCheckEnum("return_qty_check").notNull().default("WARN"),
+    returnPrefix: varchar("return_prefix", { length: 20 }).notNull().default("SR"),
+    returnDigits: smallint("return_digits").notNull().default(4),
+    returnPrintFormat: printFormatEnum("return_print_format").notNull().default("A4"),
     updatedAt: updatedAt(),
   },
   (t) => [
     check("sales_settings_single_row", sql`${t.id} = 1`),
-    check("sales_settings_digits", sql`${t.invoiceDigits} between 3 and 8 and ${t.receiptDigits} between 3 and 8`),
+    check(
+      "sales_settings_digits",
+      sql`${t.invoiceDigits} between 3 and 8 and ${t.receiptDigits} between 3 and 8 and ${t.returnDigits} between 3 and 8`,
+    ),
   ],
 );
 
@@ -650,28 +665,163 @@ export const receiptAllocations = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------- credit pool
 /**
- * A customer's earlier advance used to pay a bill. Moves no money and doesn't
- * change the balance (the advance is already a credit in the ledger) — it only
- * makes the bill show as paid. A cancel marks the row reversed.
+ * Unapplied credit a customer holds: an opening balance entered as Cr, money kept
+ * as an advance (one row per ADVANCE receipt allocation), or a sales return's
+ * value. `remaining` is what is still unused; it only changes under the customer
+ * row lock. Never deleted — a cancel sets reversed_at (and remaining = 0).
+ * Advance available = Σ remaining of the customer's live credits.
  */
-export const advanceAdjustments = pgTable(
-  "advance_adjustments",
+export const customerCredits = pgTable(
+  "customer_credits",
   {
     id: serial("id").primaryKey(),
     customerId: integer("customer_id").notNull().references(() => customers.id),
-    salesId: integer("sales_id").notNull().references(() => salesHeader.id),
-    adjDate: date("adj_date").notNull(),
+    sourceType: creditSourceEnum("source_type").notNull(),
+    // OPENING_CR → customers.id · ADVANCE → receipt_allocations.id · SALES_RETURN → sales_return_header.id
+    sourceId: integer("source_id").notNull(),
+    creditDate: date("credit_date").notNull(),
     amount: money("amount").notNull(),
+    remaining: money("remaining").notNull(),
     reversedAt: timestamp("reversed_at", { withTimezone: true }),
     reversedBy: integer("reversed_by").references(() => users.id),
-    createdBy: integer("created_by").notNull().references(() => users.id),
+    createdBy: integer("created_by").references(() => users.id),
     createdAt: createdAt(),
   },
   (t) => [
-    index("advance_adjustments_customer_idx").on(t.customerId),
-    index("advance_adjustments_sales_idx").on(t.salesId),
-    check("advance_adjustments_amount_positive", sql`${t.amount} > 0`),
+    index("customer_credits_customer_idx").on(t.customerId),
+    uniqueIndex("customer_credits_source_uq").on(t.sourceType, t.sourceId),
+    check("customer_credits_amount_positive", sql`${t.amount} > 0`),
+    check("customer_credits_remaining_range", sql`${t.remaining} >= 0 and ${t.remaining} <= ${t.amount}`),
+    check("customer_credits_reversed_empty", sql`${t.reversedAt} is null or ${t.remaining} = 0`),
+  ],
+);
+
+/**
+ * How credit was used: against a bill, against the opening balance, or paid out
+ * as a refund. Moves no money by itself and doesn't change the ledger balance —
+ * it only makes the bill / opening show as paid. A cancel marks it reversed (and
+ * puts the amount back into the credit's remaining).
+ */
+export const creditApplications = pgTable(
+  "credit_applications",
+  {
+    id: serial("id").primaryKey(),
+    creditId: integer("credit_id").notNull().references(() => customerCredits.id),
+    customerId: integer("customer_id").notNull().references(() => customers.id),
+    targetType: creditTargetEnum("target_type").notNull(),
+    salesId: integer("sales_id").references(() => salesHeader.id),
+    appliedDate: date("applied_date").notNull(),
+    amount: money("amount").notNull(),
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+    reversedBy: integer("reversed_by").references(() => users.id),
+    createdBy: integer("created_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("credit_applications_credit_idx").on(t.creditId),
+    index("credit_applications_customer_idx").on(t.customerId),
+    index("credit_applications_sales_idx").on(t.salesId),
+    check("credit_applications_amount_positive", sql`${t.amount} > 0`),
+    check("credit_applications_bill_has_sale", sql`(${t.targetType} = 'BILL') = (${t.salesId} is not null)`),
+  ],
+);
+
+// ---------------------------------------------------------------- sales return (credit note)
+export const salesReturnHeader = pgTable(
+  "sales_return_header",
+  {
+    id: serial("id").primaryKey(),
+    returnNo: varchar("return_no", { length: 40 }).notNull().unique(),
+    fy: varchar("fy", { length: 5 }).notNull(),
+    returnDate: date("return_date").notNull(),
+    customerId: integer("customer_id").notNull().references(() => customers.id),
+    locationId: integer("location_id").notNull().references(() => locations.id), // stock goes back here
+    againstSalesId: integer("against_sales_id").references(() => salesHeader.id),
+    // Snapshot of the customer as printed on the credit note
+    customerName: varchar("customer_name", { length: 160 }).notNull(),
+    customerGstin: varchar("customer_gstin", { length: 15 }),
+    customerStateCode: char("customer_state_code", { length: 2 }).notNull(),
+    customerAddress: text("customer_address"),
+    customerPhone: varchar("customer_phone", { length: 30 }),
+    gstMode: saleGstModeEnum("gst_mode").notNull(),
+    taxType: taxTypeEnum("tax_type").notNull(),
+    totalQty: integer("total_qty").notNull(),
+    gross: money("gross").notNull(),
+    taxable: money("taxable").notNull(),
+    gstAmount: money("gst_amount").notNull(),
+    gstOverridden: boolean("gst_overridden").notNull().default(false),
+    cgst: money("cgst").notNull().default("0"),
+    sgst: money("sgst").notNull().default("0"),
+    igst: money("igst").notNull().default("0"),
+    roundOff: money("round_off").notNull().default("0"),
+    netAmount: money("net_amount").notNull(),
+    // How the return value was settled: applied to dues + kept as advance + refunded = net
+    appliedToDues: money("applied_to_dues").notNull().default("0"),
+    advanceCreated: money("advance_created").notNull().default("0"),
+    refundAmount: money("refund_amount").notNull().default("0"),
+    refundMode: payModeEnum("refund_mode"),
+    prevBalance: money("prev_balance").notNull().default("0"), // signed: + Dr / − Cr
+    balanceAfter: money("balance_after").notNull().default("0"),
+    remarks: text("remarks"),
+    status: saleStatusEnum("status").notNull().default("SAVED"),
+    cancelReason: text("cancel_reason"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledBy: integer("cancelled_by").references(() => users.id),
+    version: integer("version").notNull().default(1),
+    createdBy: integer("created_by").notNull().references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("sales_return_customer_date_idx").on(t.customerId, t.returnDate),
+    index("sales_return_date_idx").on(t.returnDate),
+    index("sales_return_against_idx").on(t.againstSalesId),
+    index("sales_return_status_idx").on(t.status),
+    check(
+      "sales_return_amounts_nonneg",
+      sql`${t.gross} >= 0 and ${t.taxable} >= 0 and ${t.gstAmount} >= 0 and ${t.cgst} >= 0 and ${t.sgst} >= 0 and ${t.igst} >= 0 and ${t.appliedToDues} >= 0 and ${t.advanceCreated} >= 0 and ${t.refundAmount} >= 0`,
+    ),
+    check("sales_return_net_positive", sql`${t.netAmount} > 0`),
+    check("sales_return_qty_positive", sql`${t.totalQty} > 0`),
+    check("sales_return_settled", sql`${t.appliedToDues} + ${t.advanceCreated} + ${t.refundAmount} = ${t.netAmount}`),
+    check("sales_return_refund_mode", sql`(${t.refundAmount} > 0) = (${t.refundMode} is not null)`),
+    check("sales_return_cancel_reason", sql`${t.status} <> 'CANCELLED' or ${t.cancelReason} is not null`),
+  ],
+);
+
+export const salesReturnLines = pgTable(
+  "sales_return_lines",
+  {
+    id: serial("id").primaryKey(),
+    returnId: integer("return_id").notNull().references(() => salesReturnHeader.id),
+    lineNo: integer("line_no").notNull(),
+    productId: integer("product_id").notNull().references(() => products.id),
+    originalSalesLineId: integer("original_sales_line_id").references(() => salesLines.id),
+    barcode: varchar("barcode", { length: 40 }).notNull(),
+    itemName: varchar("item_name", { length: 200 }).notNull(),
+    hsnCode: varchar("hsn_code", { length: 8 }).notNull(),
+    gstRate: rate("gst_rate").notNull(),
+    qty: integer("qty").notNull(),
+    rate: money("rate").notNull(),
+    amount: money("amount").notNull(), // qty × rate
+    taxable: money("taxable").notNull(),
+    gstAmount: money("gst_amount").notNull(),
+    cgst: money("cgst").notNull().default("0"),
+    sgst: money("sgst").notNull().default("0"),
+    igst: money("igst").notNull().default("0"),
+  },
+  (t) => [
+    uniqueIndex("sales_return_lines_line_uq").on(t.returnId, t.lineNo),
+    index("sales_return_lines_product_idx").on(t.productId),
+    index("sales_return_lines_orig_idx").on(t.originalSalesLineId),
+    check("sales_return_lines_qty_positive", sql`${t.qty} > 0`),
+    check("sales_return_lines_rate_positive", sql`${t.rate} > 0`),
+    check(
+      "sales_return_lines_amounts_nonneg",
+      sql`${t.amount} >= 0 and ${t.taxable} >= 0 and ${t.gstAmount} >= 0 and ${t.cgst} >= 0 and ${t.sgst} >= 0 and ${t.igst} >= 0`,
+    ),
   ],
 );
 

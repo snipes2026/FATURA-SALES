@@ -27,7 +27,8 @@ export function Sidebar({ role, collapsed, onToggle }: { role: string; collapsed
       <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
         {items.map((item) => {
           const section = item.href.split("/").slice(0, 2).join("/"); // "/customers/ledger" is active on any /customers page
-          const active = item.href === "/" ? pathname === "/" : pathname.startsWith(section);
+          // whole path segments only — "/sales" must not light up on "/sales-returns"
+          const active = item.href === "/" ? pathname === "/" : pathname === section || pathname.startsWith(`${section}/`);
           const Icon = item.icon;
           const inner = (
             <>
@@ -87,7 +88,7 @@ export function MobileNav({ role, open, onClose }: { role: string; open: boolean
             onClick={onClose}
             className={cn(
               "flex h-10 items-center gap-3 rounded-md px-3 text-sm",
-              (item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)) ? "bg-primary-soft text-primary" : "text-slate-700",
+              (item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`)) ? "bg-primary-soft text-primary" : "text-slate-700",
             )}
           >
             <item.icon className="size-[18px]" />

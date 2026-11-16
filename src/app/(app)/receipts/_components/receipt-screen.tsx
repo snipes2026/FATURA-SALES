@@ -178,7 +178,11 @@ export function ReceiptScreen({
           </div>
           <div className="flex min-w-[200px] flex-col justify-center rounded-md bg-slate-50 px-3 py-2">
             <span className="text-xs text-muted">Current Balance</span>
-            {customer ? <BalanceText paise={account?.balancePaise ?? customer.balancePaise} className="text-base" /> : <span className="text-muted">—</span>}
+            {customer ? (
+              <BalanceText paise={account?.balancePaise ?? customer.balancePaise} returnCredit={account?.advanceFromReturns} className="text-base" />
+            ) : (
+              <span className="text-muted">—</span>
+            )}
           </div>
           <div className="flex items-end gap-2">
             <label className="text-xs text-muted">

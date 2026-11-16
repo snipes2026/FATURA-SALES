@@ -4,8 +4,9 @@ import { schema, type Tx } from "@/db";
 import { COUNTER } from "@/lib/counters";
 import { financialYear } from "@/lib/dates";
 import { formatAmount } from "@/lib/india";
-import { fromPaise } from "@/lib/money";
+import { fromPaise, toPaise } from "@/lib/money";
 import type { AllocateResult } from "@/lib/sales/allocate";
+import { addCredit } from "@/lib/sales/credits";
 import { formatDocNo } from "@/lib/validation/sales";
 
 type SalesSettingsRow = typeof schema.salesSettings.$inferSelect;
@@ -21,7 +22,7 @@ export async function loadSalesSettings(tx: Tx): Promise<SalesSettingsRow> {
  * Next bill / receipt number for the financial year of `date`, under a
  * SELECT … FOR UPDATE lock on the counters row (gap-free, no duplicates).
  */
-export async function nextDocNo(tx: Tx, kind: "INVOICE" | "RECEIPT", date: string, s: SalesSettingsRow) {
+export async function nextDocNo(tx: Tx, kind: "INVOICE" | "RECEIPT" | "SALES_RETURN", date: string, s: SalesSettingsRow) {
   const fy = financialYear(date);
   const name = COUNTER[kind];
   await tx.insert(schema.counters).values({ name, fy, lastValue: 0 }).onConflictDoNothing();
@@ -35,7 +36,12 @@ export async function nextDocNo(tx: Tx, kind: "INVOICE" | "RECEIPT", date: strin
     .update(schema.counters)
     .set({ lastValue: next })
     .where(and(eq(schema.counters.name, name), eq(schema.counters.fy, fy)));
-  const fmt = kind === "INVOICE" ? { prefix: s.invoicePrefix, digits: s.invoiceDigits } : { prefix: s.receiptPrefix, digits: s.receiptDigits };
+  const fmt =
+    kind === "INVOICE"
+      ? { prefix: s.invoicePrefix, digits: s.invoiceDigits }
+      : kind === "RECEIPT"
+        ? { prefix: s.receiptPrefix, digits: s.receiptDigits }
+        : { prefix: s.returnPrefix, digits: s.returnDigits };
   return { no: formatDocNo(fmt, fy, next), fy };
 }
 
@@ -105,7 +111,14 @@ export async function postReceipt(
   const allocated = allocs.reduce((a, x) => a + x.amount, 0);
   if (allocated !== total) throw new Error(`Receipt ${no}: allocated ${allocated} ≠ received ${total}`);
 
-  await tx.insert(schema.receiptAllocations).values(allocs.map((a) => ({ receiptId: r.id, targetType: a.targetType, salesId: a.salesId, amount: fromPaise(a.amount) })));
+  const allocRows = await tx
+    .insert(schema.receiptAllocations)
+    .values(allocs.map((a) => ({ receiptId: r.id, targetType: a.targetType, salesId: a.salesId, amount: fromPaise(a.amount) })))
+    .returning({ id: schema.receiptAllocations.id, targetType: schema.receiptAllocations.targetType, amount: schema.receiptAllocations.amount });
+  // Money kept as advance goes into the customer's credit pool
+  for (const a of allocRows)
+    if (a.targetType === "ADVANCE")
+      await addCredit(tx, { customerId: p.customerId, sourceType: "ADVANCE", sourceId: a.id, date: p.date, amount: toPaise(a.amount), userId: p.userId });
 
   await tx.insert(schema.customerLedger).values(
     allocs.map((a) => ({

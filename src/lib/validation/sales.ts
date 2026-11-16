@@ -81,10 +81,16 @@ export const salesSettingsSchema = z
     printFormat: z.enum(["A4", "THERMAL80"]),
     walkinAllowCredit: z.boolean(),
     walkinAllowAdvance: z.boolean(),
+    returnQtyCheck: z.enum(["OFF", "WARN", "BLOCK"]),
+    returnPrefix: docPrefix,
+    returnDigits: digits,
+    returnPrintFormat: z.enum(["A4", "THERMAL80"]),
   })
   .superRefine((v, ctx) => {
     if (v.invoicePrefix === v.receiptPrefix)
       ctx.addIssue({ code: "custom", path: ["receiptPrefix"], message: "Must differ from the invoice prefix" });
+    if (v.returnPrefix === v.invoicePrefix || v.returnPrefix === v.receiptPrefix)
+      ctx.addIssue({ code: "custom", path: ["returnPrefix"], message: "Must differ from the invoice and receipt prefixes" });
     if (v.bank2Enabled && v.bank1Name.toLowerCase() === v.bank2Name.toLowerCase())
       ctx.addIssue({ code: "custom", path: ["bank2Name"], message: "Must differ from Bank 1" });
   });

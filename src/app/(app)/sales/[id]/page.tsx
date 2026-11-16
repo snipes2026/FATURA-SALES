@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Printer } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
@@ -58,13 +58,20 @@ export default async function SalesBillPage({ params }: { params: Promise<{ id: 
   const paidWithBill = allocs.filter((a) => a.source === "SALE" && !a.reversedAt).reduce((s, a) => s + toPaise(a.amount), 0);
   const laterOpen = allocs.filter((a) => a.source !== "SALE" && !a.reversedAt);
 
+  const [creditRow] = await db
+    .select({ s: sql<string>`coalesce(sum(${schema.creditApplications.amount}), 0)::numeric(14,2)` })
+    .from(schema.creditApplications)
+    .where(and(eq(schema.creditApplications.salesId, id), isNull(schema.creditApplications.reversedAt)));
+  const creditApplied = toPaise(creditRow.s);
+
   const consequences = [
     `${h.totalQty} pcs go back into stock at ${location?.name}.`,
     `${h.customerName}'s balance goes down by ₹${amt(h.netAmount)}.`,
-    ...(toPaise(h.advanceUsed) > 0 ? [`₹${amt(h.advanceUsed)} of advance used on this bill goes back to the customer.`] : []),
+    ...(creditApplied > 0 ? [`₹${formatAmount(fromPaise(creditApplied))} of advance / credit used on this bill goes back to the customer.`] : []),
     ...(paidWithBill > 0
       ? [isWalkin ? `₹${formatAmount(fromPaise(paidWithBill))} paid for this bill is refunded.` : `₹${formatAmount(fromPaise(paidWithBill))} paid for this bill is kept as the customer's advance.`]
       : []),
+    ...(!isWalkin && creditApplied + paidWithBill > 0 ? ["If the customer has other pending bills, that amount is applied to them first (oldest first)."] : []),
   ];
 
   const td = "border-b border-border px-3 py-1.5";
